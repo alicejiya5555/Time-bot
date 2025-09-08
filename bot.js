@@ -1,24 +1,35 @@
+// =====================
+// Full bot.js for live Telegram worker bot
+// =====================
+
 const express = require("express");
-const bodyParser = require("body-parser");
 const TelegramBot = require("node-telegram-bot-api");
 const moment = require("moment");
 
-const token = "7794861572:AAGZ_bzHuQlXhDTKBdSC95ynrGjVy8aCuaw"; // Replace with your Bot Token
+// ======== CONFIGURATION ========
+const token = "7794861572:AAGZ_bzHuQlXhDTKBdSC95ynrGjVy8aCuaw"; // Replace with your Telegram Bot token
 const url = "https://time-bot-i88p.onrender.com"; // Replace with your Render app URL
 const port = process.env.PORT || 3000;
 
-const bot = new TelegramBot(token, { webHook: { port } });
+// ======== EXPRESS SERVER ========
+const app = express();
+app.use(express.json());
+
+// ======== TELEGRAM BOT (Webhook mode) ========
+const bot = new TelegramBot(token);
 bot.setWebHook(`${url}/bot${token}`);
 
-const app = express();
-app.use(bodyParser.json());
-
+// Webhook endpoint
 app.post(`/bot${token}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-let workers = {}; // Per-user data
+// Health check endpoint
+app.get("/", (req, res) => res.send("✅ Bot is live and running..."));
+
+// ======== WORKERS DATA ========
+let workers = {}; // Stores per-user daily info
 
 function resetDaily(userId) {
   workers[userId] = {
@@ -36,6 +47,7 @@ function ensureUser(userId) {
   return workers[userId];
 }
 
+// ======== HELPER FUNCTIONS ========
 function startActivity(userId, type, limit, maxTimes) {
   const user = ensureUser(userId);
 
@@ -78,6 +90,8 @@ function backToSeat(userId) {
   user.currentActivity = null;
   return msg;
 }
+
+// ======== TELEGRAM COMMANDS ========
 
 // /startwork
 bot.onText(/\/startwork/, (msg) => {
@@ -123,16 +137,22 @@ bot.onText(/\/offwork/, (msg) => {
   bot.sendMessage(chatId, summary);
 });
 
-// Activities
+// /eat
 bot.onText(/\/eat/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "eat", 30, 2)));
+
+// /wc
 bot.onText(/\/wc/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "wc", 10, 6)));
+
+// /smoke
 bot.onText(/\/smoke/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "smoke", 5, 5)));
+
+// /takeout
 bot.onText(/\/takeout/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "takeout", 5, 2)));
 
-// Back to seat
+// /backtoseat
 bot.onText(/\/backtoseat/, (msg) => bot.sendMessage(msg.chat.id, backToSeat(msg.chat.id)));
 
-app.get("/", (req, res) => res.send("Bot is running..."));
-
-app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
-
+// ======== START EXPRESS SERVER ========
+app.listen(port, () => {
+  console.log(`🚀 Server running on port ${port}`);
+});
