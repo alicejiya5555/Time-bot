@@ -110,15 +110,21 @@ function backToSeat(user) {
 
 function startWorkMessage(user) {
   const userData = ensureUser(user.id);
-  const now = moment();
+  const now = moment.utc(); // use UTC time
   userData.started = true;
   userData.startTime = now;
 
-  const scheduled = moment().hour(16).minute(0).second(0);
-  let diff = now.diff(scheduled, "minutes");
+  // Scheduled work start is always 16:00 UTC
+  const scheduled = moment.utc().hour(16).minute(0).second(0);
 
+  let diffSeconds = now.diff(scheduled, 'seconds');
   let note = "";
-  if (diff > 0) note = `⚠️ You are late by ${diff} minutes`;
+
+  if (diffSeconds > 0) {
+    const minutesLate = Math.floor(diffSeconds / 60);
+    const secondsLate = diffSeconds % 60;
+    note = `⚠️ You are late by ${minutesLate}m ${secondsLate}s`;
+  }
 
   let output = `Name: ${user.first_name || "Unknown"}\n`;
   output += `Chat ID: ${user.id}\n`;
@@ -183,3 +189,4 @@ bot.onText(/\/backtoseat/, (msg) => bot.sendMessage(msg.chat.id, backToSeat(msg.
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });
+
