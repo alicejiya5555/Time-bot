@@ -1,109 +1,116 @@
+const express = require("express");
+const bodyParser = require("body-parser");
 const TelegramBot = require("node-telegram-bot-api");
 const moment = require("moment");
 
-const token = "7794861572:AAGZ_bzHuQlXhDTKBdSC95ynrGjVy8aCuaw";
-const bot = new TelegramBot(token, { polling: true });
+const token = "7794861572:AAGZ_bzHuQlXhDTKBdSC95ynrGjVy8aCuaw"; // Replace with your Bot Token
+const url = "https://time-bot-i88p.onrender.com; // Replace with your Render app URL
+const port = process.env.PORT || 3000;
 
-let workers = {}; // Store data per user
+const bot = new TelegramBot(token, { webHook: { port } });
+bot.setWebHook(`${url}/bot${token}`);
 
-// Helper: Reset daily record at 12AM
+const app = express();
+app.use(bodyParser.json());
+
+app.post(`/bot${token}`, (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
+let workers = {}; // Per-user data
+
 function resetDaily(userId) {
   workers[userId] = {
+    started: false,
     startTime: null,
     endTime: null,
+    currentActivity: null,
     activities: [],
-    breaks: {
-      eat: [],
-      wc: [],
-      smoke: [],
-      takeout: []
-    }
+    breaks: { eat: [], wc: [], smoke: [], takeout: [] }
   };
 }
 
-// Helper: Start activity
-function startActivity(userId, type, limit, maxTimes) {
-  const user = workers[userId];
-  const today = moment().format("YYYY-MM-DD");
-
-  if (!user) resetDaily(userId);
-
-  // Count used
-  const used = workers[userId].breaks[type].length;
-
-  if (used >= maxTimes) {
-    return `❌ You already used ${type.toUpperCase()} ${maxTimes} times today.`;
-  }
-
-  workers[userId].activities.push({ type, start: moment(), end: null, limit });
-  workers[userId].breaks[type].push({ start: moment(), end: null });
-
-  return `✅ ${type.toUpperCase()} started. Allowed time: ${limit} min.`;
+function ensureUser(userId) {
+  if (!workers[userId]) resetDaily(userId);
+  return workers[userId];
 }
 
-// Helper: Back to seat
+function startActivity(userId, type, limit, maxTimes) {
+  const user = ensureUser(userId);
+
+  if (!user.started) return "⚠️ Please start work first with /startwork.";
+
+  if (user.currentActivity) {
+    return `⚠️ You are already in activity: ${user.currentActivity.type.toUpperCase()}. Please /backtoseat first.`;
+  }
+
+  const used = user.breaks[type].length;
+  if (used >= maxTimes) return `❌ ${type.toUpperCase()} limit reached for today.`;
+
+  const activity = { type, start: moment(), end: null, limit };
+  user.currentActivity = activity;
+  user.activities.push(activity);
+  user.breaks[type].push(activity);
+
+  return `✅ ${type.toUpperCase()} started. Limit: ${limit} min.`;
+}
+
 function backToSeat(userId) {
-  const user = workers[userId];
-  if (!user || user.activities.length === 0) {
-    return "⚠️ You have no activity yet!";
+  const user = ensureUser(userId);
+
+  if (!user.currentActivity) {
+    return "⚠️ No ongoing activity. Start one first.";
   }
 
-  let last = user.activities[user.activities.length - 1];
-  if (last.end) {
-    return "⚠️ Last activity already ended. Start a new one.";
-  }
-
-  last.end = moment();
-
-  // Get duration
-  const duration = moment.duration(last.end.diff(last.start));
+  user.currentActivity.end = moment();
+  const duration = moment.duration(user.currentActivity.end.diff(user.currentActivity.start));
   const minutes = Math.floor(duration.asMinutes());
   const seconds = duration.seconds();
 
-  // Limit check
-  let msg = `🔙 Back to seat. Activity: ${last.type.toUpperCase()} lasted ${minutes}m ${seconds}s.`;
-  if (minutes * 60 + seconds > last.limit * 60) {
-    msg += ` ⚠️ You are late by ${minutes - last.limit}m ${seconds}s.`;
+  let msg = `🔙 Back to seat. ${user.currentActivity.type.toUpperCase()} lasted ${minutes}m ${seconds}s.`;
+  if (minutes * 60 + seconds > user.currentActivity.limit * 60) {
+    msg += ` ⚠️ Late by ${minutes - user.currentActivity.limit}m ${seconds}s.`;
   } else {
     msg += " ✅ On time!";
   }
 
+  user.currentActivity = null;
   return msg;
 }
 
-// 🟢 START WORK
+// /startwork
 bot.onText(/\/startwork/, (msg) => {
   const chatId = msg.chat.id;
-  const now = moment();
-  if (!workers[chatId]) resetDaily(chatId);
+  const user = ensureUser(chatId);
 
-  workers[chatId].startTime = now;
+  const now = moment();
+  user.started = true;
+  user.startTime = now;
 
   const scheduled = moment().hour(16).minute(0).second(0);
   let diff = now.diff(scheduled, "minutes");
 
   if (diff > 0) {
-    bot.sendMessage(chatId, `⏰ You are late by ${diff} minutes!`);
+    bot.sendMessage(chatId, `⏰ Work started, but you are late by ${diff} minutes!`);
   } else {
-    bot.sendMessage(chatId, "✅ Work started on time at 4PM.");
+    bot.sendMessage(chatId, "✅ Work started on time.");
   }
 });
 
-// 🔴 OFF WORK
+// /offwork
 bot.onText(/\/offwork/, (msg) => {
   const chatId = msg.chat.id;
-  const user = workers[chatId];
-  if (!user || !user.startTime) {
-    return bot.sendMessage(chatId, "⚠️ You have not started work today.");
-  }
+  const user = ensureUser(chatId);
+
+  if (!user.started) return bot.sendMessage(chatId, "⚠️ You haven't started work today.");
 
   user.endTime = moment();
   const duration = moment.duration(user.endTime.diff(user.startTime));
   const hours = Math.floor(duration.asHours());
   const minutes = duration.minutes();
 
-  let summary = `📊 Work Summary:\n🕒 Total Worked: ${hours}h ${minutes}m\n\n`;
-
+  let summary = `📊 Work Summary:\n🕒 Worked: ${hours}h ${minutes}m\n\n`;
   let activityCounts = {};
   user.activities.forEach((a) => {
     activityCounts[a.type] = (activityCounts[a.type] || 0) + 1;
@@ -116,27 +123,15 @@ bot.onText(/\/offwork/, (msg) => {
   bot.sendMessage(chatId, summary);
 });
 
-// 🍽 EAT (2 times, 30 min)
-bot.onText(/\/eat/, (msg) => {
-  bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "eat", 30, 2));
-});
+// Activities
+bot.onText(/\/eat/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "eat", 30, 2)));
+bot.onText(/\/wc/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "wc", 10, 6)));
+bot.onText(/\/smoke/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "smoke", 5, 5)));
+bot.onText(/\/takeout/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "takeout", 5, 2)));
 
-// 🚽 WC (6 times, 10 min)
-bot.onText(/\/wc/, (msg) => {
-  bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "wc", 10, 6));
-});
+// Back to seat
+bot.onText(/\/backtoseat/, (msg) => bot.sendMessage(msg.chat.id, backToSeat(msg.chat.id)));
 
-// 🚬 SMOKE (5 times, 5 min)
-bot.onText(/\/smoke/, (msg) => {
-  bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "smoke", 5, 5));
-});
+app.get("/", (req, res) => res.send("Bot is running..."));
 
-// 🚶 TAKEOUT (2 times, 5 min)
-bot.onText(/\/takeout/, (msg) => {
-  bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "takeout", 5, 2));
-});
-
-// 🔙 BACK TO SEAT
-bot.onText(/\/backtoseat/, (msg) => {
-  bot.sendMessage(msg.chat.id, backToSeat(msg.chat.id));
-});
+app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
