@@ -181,7 +181,7 @@ function offWorkMessage(user) {
   output += `Activity: Off work successfully\n`;
   output += `Total work hours: ${hours}h ${minutes}m ${seconds}s\n`;
   output += `Today Activities:\n${activitiesSummary || "None"}\n`;
-  output += `Check In Time: ${formatTimeShort(userData.startTime)}`;
+  output += `Check out Time: ${formatTimeShort(userData.startTime)}`;
 
   // Reset for next day if needed
   resetDaily(user.id);
@@ -208,3 +208,4 @@ bot.onText(/\/backtoseat/, (msg) => bot.sendMessage(msg.chat.id, backToSeat(msg.
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });
+
