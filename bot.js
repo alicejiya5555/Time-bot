@@ -4,7 +4,7 @@ const TelegramBot = require("node-telegram-bot-api");
 const moment = require("moment");
 
 const token = "7794861572:AAGZ_bzHuQlXhDTKBdSC95ynrGjVy8aCuaw"; // Replace with your Bot Token
-const url = "https://time-bot-i88p.onrender.com; // Replace with your Render app URL
+const url = "https://time-bot-i88p.onrender.com"; // Replace with your Render app URL
 const port = process.env.PORT || 3000;
 
 const bot = new TelegramBot(token, { webHook: { port } });
@@ -135,3 +135,4 @@ bot.onText(/\/backtoseat/, (msg) => bot.sendMessage(msg.chat.id, backToSeat(msg.
 app.get("/", (req, res) => res.send("Bot is running..."));
 
 app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
+
