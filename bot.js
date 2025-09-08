@@ -1,5 +1,6 @@
 // =====================
 // Full bot.js for live Telegram worker bot
+// with formatted output
 // =====================
 
 const express = require("express");
@@ -48,47 +49,109 @@ function ensureUser(userId) {
 }
 
 // ======== HELPER FUNCTIONS ========
-function startActivity(userId, type, limit, maxTimes) {
-  const user = ensureUser(userId);
+function formatTimeShort(time) {
+  return moment(time).format("DD/MM/YYYY HH:mm");
+}
 
-  if (!user.started) return "⚠️ Please start work first with /startwork.";
+function startActivity(user, type, limit, maxTimes) {
+  const userData = ensureUser(user.id);
 
-  if (user.currentActivity) {
-    return `⚠️ You are already in activity: ${user.currentActivity.type.toUpperCase()}. Please /backtoseat first.`;
+  if (!userData.started) return "⚠️ Please start work first with /startwork.";
+
+  if (userData.currentActivity) {
+    return `⚠️ You are already in activity: ${userData.currentActivity.type.toUpperCase()}. Please /backtoseat first.`;
   }
 
-  const used = user.breaks[type].length;
+  const used = userData.breaks[type].length;
   if (used >= maxTimes) return `❌ ${type.toUpperCase()} limit reached for today.`;
 
   const activity = { type, start: moment(), end: null, limit };
-  user.currentActivity = activity;
-  user.activities.push(activity);
-  user.breaks[type].push(activity);
+  userData.currentActivity = activity;
+  userData.activities.push(activity);
+  userData.breaks[type].push(activity);
 
-  return `✅ ${type.toUpperCase()} started. Limit: ${limit} min.`;
+  let output = `Name: ${user.first_name || "Unknown"}\n`;
+  output += `Chat ID: ${user.id}\n`;
+  output += `Activity: ${type.toUpperCase()} started\n`;
+  output += `Duration: ${limit} minutes\n`;
+  output += `Note:\n`; // Empty as started
+  output += `Check In Time: ${formatTimeShort(activity.start)}`;
+
+  return output;
 }
 
-function backToSeat(userId) {
-  const user = ensureUser(userId);
+function backToSeat(user) {
+  const userData = ensureUser(user.id);
 
-  if (!user.currentActivity) {
+  if (!userData.currentActivity) {
     return "⚠️ No ongoing activity. Start one first.";
   }
 
-  user.currentActivity.end = moment();
-  const duration = moment.duration(user.currentActivity.end.diff(user.currentActivity.start));
+  userData.currentActivity.end = moment();
+  const duration = moment.duration(userData.currentActivity.end.diff(userData.currentActivity.start));
   const minutes = Math.floor(duration.asMinutes());
   const seconds = duration.seconds();
 
-  let msg = `🔙 Back to seat. ${user.currentActivity.type.toUpperCase()} lasted ${minutes}m ${seconds}s.`;
-  if (minutes * 60 + seconds > user.currentActivity.limit * 60) {
-    msg += ` ⚠️ Late by ${minutes - user.currentActivity.limit}m ${seconds}s.`;
-  } else {
-    msg += " ✅ On time!";
+  let note = "";
+  if (minutes * 60 + seconds > userData.currentActivity.limit * 60) {
+    note = `⚠️ Late by ${minutes - userData.currentActivity.limit}m ${seconds}s`;
   }
 
-  user.currentActivity = null;
-  return msg;
+  let output = `Name: ${user.first_name || "Unknown"}\n`;
+  output += `Chat ID: ${user.id}\n`;
+  output += `Activity: ${userData.currentActivity.type.toUpperCase()} completed\n`;
+  output += `Duration: ${minutes}m ${seconds}s\n`;
+  output += `Note: ${note}\n`;
+  output += `Check In Time: ${formatTimeShort(userData.currentActivity.start)}`;
+
+  userData.currentActivity = null;
+  return output;
+}
+
+function startWorkMessage(user) {
+  const userData = ensureUser(user.id);
+  const now = moment();
+  userData.started = true;
+  userData.startTime = now;
+
+  const scheduled = moment().hour(16).minute(0).second(0);
+  let diff = now.diff(scheduled, "minutes");
+
+  let note = "";
+  if (diff > 0) note = `⚠️ You are late by ${diff} minutes`;
+
+  let output = `Name: ${user.first_name || "Unknown"}\n`;
+  output += `Chat ID: ${user.id}\n`;
+  output += `Activity: Start work successfully\n`;
+  output += `Note: ${note}\n`;
+  output += `Check In Time: ${formatTimeShort(now)}`;
+
+  return output;
+}
+
+function offWorkMessage(user) {
+  const userData = ensureUser(user.id);
+  userData.endTime = moment();
+
+  const totalDuration = moment.duration(userData.endTime.diff(userData.startTime));
+  const hours = Math.floor(totalDuration.asHours());
+  const minutes = totalDuration.minutes();
+  const seconds = totalDuration.seconds();
+
+  let activitiesSummary = "";
+  userData.activities.forEach((a) => {
+    const dur = a.end ? moment.duration(a.end.diff(a.start)) : moment.duration(0);
+    activitiesSummary += `- ${a.type.toUpperCase()}: ${Math.floor(dur.asMinutes())}m ${dur.seconds()}s\n`;
+  });
+
+  let output = `Name: ${user.first_name || "Unknown"}\n`;
+  output += `Chat ID: ${user.id}\n`;
+  output += `Activity: Off work successfully\n`;
+  output += `Total work hours: ${hours}h ${minutes}m ${seconds}s\n`;
+  output += `Today Activities:\n${activitiesSummary || "None"}\n`;
+  output += `Check In Time: ${formatTimeShort(userData.startTime)}`;
+
+  return output;
 }
 
 // ======== TELEGRAM COMMANDS ========
@@ -96,61 +159,25 @@ function backToSeat(userId) {
 // /startwork
 bot.onText(/\/startwork/, (msg) => {
   const chatId = msg.chat.id;
-  const user = ensureUser(chatId);
-
-  const now = moment();
-  user.started = true;
-  user.startTime = now;
-
-  const scheduled = moment().hour(16).minute(0).second(0);
-  let diff = now.diff(scheduled, "minutes");
-
-  if (diff > 0) {
-    bot.sendMessage(chatId, `⏰ Work started, but you are late by ${diff} minutes!`);
-  } else {
-    bot.sendMessage(chatId, "✅ Work started on time.");
-  }
+  const message = startWorkMessage(msg.from);
+  bot.sendMessage(chatId, message);
 });
 
 // /offwork
 bot.onText(/\/offwork/, (msg) => {
   const chatId = msg.chat.id;
-  const user = ensureUser(chatId);
-
-  if (!user.started) return bot.sendMessage(chatId, "⚠️ You haven't started work today.");
-
-  user.endTime = moment();
-  const duration = moment.duration(user.endTime.diff(user.startTime));
-  const hours = Math.floor(duration.asHours());
-  const minutes = duration.minutes();
-
-  let summary = `📊 Work Summary:\n🕒 Worked: ${hours}h ${minutes}m\n\n`;
-  let activityCounts = {};
-  user.activities.forEach((a) => {
-    activityCounts[a.type] = (activityCounts[a.type] || 0) + 1;
-  });
-
-  for (let [act, count] of Object.entries(activityCounts)) {
-    summary += `- ${act.toUpperCase()}: (${count})\n`;
-  }
-
-  bot.sendMessage(chatId, summary);
+  const message = offWorkMessage(msg.from);
+  bot.sendMessage(chatId, message);
 });
 
-// /eat
-bot.onText(/\/eat/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "eat", 30, 2)));
-
-// /wc
-bot.onText(/\/wc/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "wc", 10, 6)));
-
-// /smoke
-bot.onText(/\/smoke/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "smoke", 5, 5)));
-
-// /takeout
-bot.onText(/\/takeout/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.chat.id, "takeout", 5, 2)));
+// Activities
+bot.onText(/\/eat/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.from, "eat", 30, 2)));
+bot.onText(/\/wc/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.from, "wc", 10, 6)));
+bot.onText(/\/smoke/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.from, "smoke", 5, 5)));
+bot.onText(/\/takeout/, (msg) => bot.sendMessage(msg.chat.id, startActivity(msg.from, "takeout", 5, 2)));
 
 // /backtoseat
-bot.onText(/\/backtoseat/, (msg) => bot.sendMessage(msg.chat.id, backToSeat(msg.chat.id)));
+bot.onText(/\/backtoseat/, (msg) => bot.sendMessage(msg.chat.id, backToSeat(msg.from)));
 
 // ======== START EXPRESS SERVER ========
 app.listen(port, () => {
