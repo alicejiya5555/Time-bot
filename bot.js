@@ -137,17 +137,20 @@ function startWorkMessage(user) {
     return `⚠️ You have already started work today. Please press /offwork before starting again.`;
   }
 
-  const now = moment.utc(); // UTC time
+  const now = moment.utc(); // Current UTC time
   userData.started = true;
   userData.startTime = now;
 
   const scheduled = moment.utc().hour(08).minute(0).second(0); // 4PM UTC
   let diffSeconds = now.diff(scheduled, "seconds");
   let note = "";
+
   if (diffSeconds > 0) {
-    const minutesLate = Math.floor(diffSeconds / 60);
-    const secondsLate = diffSeconds % 60;
-    note = `⚠️ You are late by ${minutesLate}m ${secondsLate}s`;
+    const durationLate = moment.duration(diffSeconds, "seconds");
+    const hoursLate = Math.floor(durationLate.asHours());
+    const minutesLate = durationLate.minutes();
+    const secondsLate = durationLate.seconds();
+    note = `⚠️ You are late by ${hoursLate}h ${minutesLate}m ${secondsLate}s`;
   }
 
   let output = `Name: ${user.first_name || "Unknown"}\n`;
@@ -208,5 +211,6 @@ bot.onText(/\/backtoseat/, (msg) => bot.sendMessage(msg.chat.id, backToSeat(msg.
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });
+
 
 
