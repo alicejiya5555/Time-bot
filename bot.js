@@ -163,17 +163,39 @@ function offWorkMessage(user) {
 // ======== TELEGRAM COMMANDS ========
 
 // /startwork
+// /startwork
 bot.onText(/\/startwork/, (msg) => {
   const chatId = msg.chat.id;
-  const message = startWorkMessage(msg.from);
-  bot.sendMessage(chatId, message);
-});
+  const userData = ensureUser(msg.from.id);
 
-// /offwork
-bot.onText(/\/offwork/, (msg) => {
-  const chatId = msg.chat.id;
-  const message = offWorkMessage(msg.from);
-  bot.sendMessage(chatId, message);
+  // Check if work already started
+  if (userData.started) {
+    const warning = `⚠️ You have already started work today. Please press /offwork before starting again.`;
+    return bot.sendMessage(chatId, warning);
+  }
+
+  // Use UTC 4PM as work start reference
+  const now = moment.utc();
+  userData.started = true;
+  userData.startTime = now;
+
+  const scheduled = moment.utc().hour(16).minute(0).second(0);
+  let diffSeconds = now.diff(scheduled, 'seconds');
+  let note = "";
+
+  if (diffSeconds > 0) {
+    const minutesLate = Math.floor(diffSeconds / 60);
+    const secondsLate = diffSeconds % 60;
+    note = `⚠️ You are late by ${minutesLate}m ${secondsLate}s`;
+  }
+
+  let output = `Name: ${msg.from.first_name || "Unknown"}\n`;
+  output += `Chat ID: ${msg.from.id}\n`;
+  output += `Activity: Start work successfully\n`;
+  output += `Note: ${note}\n`;
+  output += `Check In Time: ${formatTimeShort(now)}`;
+
+  bot.sendMessage(chatId, output);
 });
 
 // Activities
@@ -189,4 +211,5 @@ bot.onText(/\/backtoseat/, (msg) => bot.sendMessage(msg.chat.id, backToSeat(msg.
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });
+
 
